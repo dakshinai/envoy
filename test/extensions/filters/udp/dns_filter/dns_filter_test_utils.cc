@@ -5,6 +5,7 @@
 #include "source/common/network/utility.h"
 
 #include "test/test_common/utility.h"
+#include "test/test_common/simulated_time_system.h"
 
 #include "ares.h"
 
@@ -103,8 +104,12 @@ absl::string_view getProtoFromName(const absl::string_view name) {
 
 DnsQueryContextPtr DnsResponseValidator::createResponseContext(Network::UdpRecvData& client_request,
                                                                DnsParserCounters& counters) {
+
+  // Create a simulated time system for testing
+  Event::SimulatedTimeSystem time_source;
+
   DnsQueryContextPtr query_context = std::make_unique<DnsQueryContext>(
-      client_request.addresses_.local_, client_request.addresses_.peer_, counters, 1);
+      client_request.addresses_.local_, client_request.addresses_.peer_, counters, 1, time_source);
 
   // TODO(boteng): The response parse can be replaced by c-ares methods like: ares_parse_a_reply
   query_context->parse_status_ = validateDnsResponseObject(query_context, client_request.buffer_);

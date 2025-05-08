@@ -19,13 +19,15 @@ static constexpr std::chrono::seconds DEFAULT_RESOLVER_TTL{300};
 
 DnsFilterEnvoyConfig::DnsFilterEnvoyConfig(
     Server::Configuration::ListenerFactoryContext& context,
-    const envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig& config)
+    const envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig& config,
+    std::vector<AccessLog::InstanceSharedPtr> access_logs)
     : root_scope_(context.scope()),
       cluster_manager_(context.serverFactoryContext().clusterManager()),
       api_(context.serverFactoryContext().api()),
       stats_(generateStats(config.stat_prefix(), root_scope_)),
       resolver_timeout_(DEFAULT_RESOLVER_TIMEOUT),
-      random_(context.serverFactoryContext().api().randomGenerator()) {
+      random_(context.serverFactoryContext().api().randomGenerator()),
+      access_logs_(std::move(access_logs)) {
   using envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig;
 
   const auto& server_config = config.server_config();
@@ -283,6 +285,43 @@ Network::FilterStatus DnsFilter::onData(Network::UdpRecvData& client_request) {
     return Network::FilterStatus::StopIteration;
   }
 
+  // --- Begin: Set dynamic metadata ---
+  // auto now = std::chrono::system_clock::now();
+  auto now = listener_.dispatcher().timeSource().systemTime();
+  auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+  std::string local_ip = client_request.addresses_.local_->ip()->addressAsString();
+  std::string remote_ip = client_request.addresses_.peer_->ip()->addressAsString();
+
+  std::string dns_question_name;
+  uint16_t dns_question_type = 0;
+  uint16_t dns_question_class = 0;
+  if (!query_context->queries_.empty()) {
+    dns_question_name = query_context->queries_[0]->name_;
+    dns_question_type = query_context->queries_[0]->type_;
+    dns_question_class = query_context->queries_[0]->class_;
+  }
+
+  ProtobufWkt::Struct metadata;
+  (*metadata.mutable_fields())["request_start_time_ms"].set_string_value(std::to_string(now_ms));
+  (*metadata.mutable_fields())["remote_ip"].set_string_value(remote_ip);
+  (*metadata.mutable_fields())["local_ip"].set_string_value(local_ip);
+  (*metadata.mutable_fields())["dns_question_name"].set_string_value(dns_question_name);
+  (*metadata.mutable_fields())["dns_question_type"].set_string_value(std::to_string(dns_question_type));
+  (*metadata.mutable_fields())["dns_question_class"].set_string_value(std::to_string(dns_question_class));
+
+
+  query_context->streamInfo().setDynamicMetadata("envoy.extensions.filters.udp.dns_filter.request", metadata);
+  // --- End: Set dynamic metadata ---
+
+  // --- Begin: Write to access logs ---
+  if (!config_->accessLogs().empty()) {
+    for (const auto& access_log : config_->accessLogs()) {
+      access_log->log({}, query_context->streamInfo());
+    }
+  } 
+  // --- End: Write to access logs ---
+  
   // Resolve the requested name and respond to the client. If the return code is
   // External, we will respond to the client when the upstream resolver returns
   if (getResponseForQuery(query_context) == DnsLookupResponseCode::External) {

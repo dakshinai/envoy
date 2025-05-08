@@ -135,7 +135,7 @@ void DnsSrvRecord::addTarget(const absl::string_view target, const DnsTargetAttr
 DnsQueryContextPtr DnsMessageParser::createQueryContext(Network::UdpRecvData& client_request,
                                                         DnsParserCounters& counters) {
   DnsQueryContextPtr query_context = std::make_unique<DnsQueryContext>(
-      client_request.addresses_.local_, client_request.addresses_.peer_, counters, retry_count_);
+      client_request.addresses_.local_, client_request.addresses_.peer_, counters, retry_count_, timesource_);
 
   query_context->parse_status_ = parseDnsObject(query_context, client_request.buffer_);
   if (!query_context->parse_status_) {

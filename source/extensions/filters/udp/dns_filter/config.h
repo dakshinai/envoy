@@ -4,6 +4,7 @@
 #include "envoy/extensions/filters/udp/dns_filter/v3/dns_filter.pb.validate.h"
 #include "envoy/server/filter_config.h"
 
+#include "envoy/extensions/access_loggers/file/v3/file.pb.h"
 #include "source/extensions/filters/udp/dns_filter/dns_filter.h"
 
 namespace Envoy {

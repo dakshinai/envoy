@@ -5,6 +5,7 @@
 #include "envoy/network/dns.h"
 #include "envoy/network/filter.h"
 
+#include "source/common/access_log/access_log_impl.h"
 #include "source/common/buffer/buffer_impl.h"
 #include "source/common/common/trie_lookup_table.h"
 #include "source/common/config/config_provider_impl.h"
@@ -80,7 +81,8 @@ class DnsFilterEnvoyConfig : public Logger::Loggable<Logger::Id::filter> {
 public:
   DnsFilterEnvoyConfig(
       Server::Configuration::ListenerFactoryContext& context,
-      const envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig& config);
+      const envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig& config,
+      std::vector<AccessLog::InstanceSharedPtr> access_logs = {});
 
   DnsFilterStats& stats() const { return stats_; }
   const absl::flat_hash_map<std::string, std::chrono::seconds>& domainTtl() const {
@@ -100,6 +102,8 @@ public:
   const TrieLookupTable<DnsVirtualDomainConfigSharedPtr>& getDnsTrie() const {
     return dns_lookup_trie_;
   }
+
+  const AccessLog::InstanceSharedPtrVector& accessLogs() const { return access_logs_; }
 
 private:
   static DnsFilterStats generateStats(const std::string& stat_prefix, Stats::Scope& scope) {
@@ -132,6 +136,7 @@ private:
   uint64_t max_pending_lookups_;
   envoy::config::core::v3::TypedExtensionConfig typed_dns_resolver_config_;
   Network::DnsResolverFactory* dns_resolver_factory_;
+  AccessLog::InstanceSharedPtrVector access_logs_;
 };
 
 using DnsFilterEnvoyConfigSharedPtr = std::shared_ptr<const DnsFilterEnvoyConfig>;

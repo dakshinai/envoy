@@ -39,6 +39,43 @@ Api::IoCallUint64Result makeNoError(uint64_t rc) {
   return no_error;
 }
 
+class StringAccessLogger : public Envoy::AccessLog::Instance {
+  public:
+    StringAccessLogger(std::vector<std::string>& output) : output_(output) {}
+  
+    void log(const Envoy::AccessLog::LogContext&,
+             const Envoy::StreamInfo::StreamInfo& stream_info) override {
+      // Access dynamic metadata from StreamInfo
+      const auto& metadata = stream_info.dynamicMetadata().filter_metadata();
+      const auto& dns_metadata = metadata.at("envoy.extensions.filters.udp.dns_filter.request").fields();
+  
+      // Retrieve metadata fields
+      const std::string request_start_time_ms = dns_metadata.at("request_start_time_ms").string_value();
+      const std::string remote_ip = dns_metadata.at("remote_ip").string_value();
+      const std::string local_ip = dns_metadata.at("local_ip").string_value();
+      const std::string dns_question_name = dns_metadata.at("dns_question_name").string_value();
+      const std::string dns_question_type = dns_metadata.at("dns_question_type").string_value();
+      const std::string dns_question_class = dns_metadata.at("dns_question_class").string_value();
+  
+      // Format the log entry to match the inline string format
+      std::string log_entry = fmt::format(
+          "Request Start Time (ms): {}\n"
+          "Remote IP: {}\n"
+          "Local IP: {}\n"
+          "DNS Question Name: {}\n"
+          "DNS Question Type: {}\n"
+          "DNS Question Class: {}\n",
+          request_start_time_ms, remote_ip, local_ip, dns_question_name, dns_question_type,
+          dns_question_class);
+  
+      // Store the log entry
+      output_.push_back(log_entry);
+    }
+  
+  private:
+    std::vector<std::string>& output_;
+  };
+
 class DnsFilterTest : public testing::Test, public Event::TestUsingSimulatedTime {
 public:
   DnsFilterTest()
@@ -70,7 +107,7 @@ public:
         true /* recursive queries */, api_->timeSource(), 0 /* retries */, random_, histogram_);
   }
 
-  void setup(const std::string& yaml) {
+  void setup(const std::string& yaml, std::vector<AccessLog::InstanceSharedPtr> access_logs = {}) {
     envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig config;
     TestUtility::loadFromYamlAndValidate(yaml, config);
     auto store = stats_store_.createScope("dns_scope");
@@ -87,7 +124,7 @@ public:
     ON_CALL(dns_resolver_factory_, createDnsResolver(_, _, _))
         .WillByDefault(DoAll(SaveArg<2>(&typed_dns_resolver_config_), Return(resolver_)));
 
-    config_ = std::make_shared<DnsFilterEnvoyConfig>(listener_factory_, config);
+    config_ = std::make_shared<DnsFilterEnvoyConfig>(listener_factory_, config, std::move(access_logs));
     filter_ = std::make_unique<DnsFilter>(callbacks_, config_);
     // Verify typed DNS resolver config is c-ares.
     EXPECT_EQ(typed_dns_resolver_config_.name(), std::string(Network::CaresDnsResolver));
@@ -604,6 +641,56 @@ TEST_F(DnsFilterTest, SingleTypeAQuery) {
   EXPECT_EQ(1, config_->stats().a_record_queries_.value());
   EXPECT_TRUE(config_->stats().downstream_rx_bytes_.used());
   EXPECT_TRUE(config_->stats().downstream_tx_bytes_.used());
+}
+
+TEST_F(DnsFilterTest, MetadataPropagationToLogs) {
+  InSequence s;
+
+  // Local variable to capture log output
+  std::vector<std::string> output_;
+
+  // Create a logger to capture log output
+  auto logger = std::make_shared<StringAccessLogger>(output_);
+
+  // Set up the DNS filter with the logger
+  setup(forward_query_off_config, {std::move(logger)});
+
+  // Send a DNS query
+  const std::string domain("www.foo3.com");
+  const std::string query =
+      Utils::buildQueryForDomain(domain, DNS_RECORD_TYPE_A, DNS_RECORD_CLASS_IN);
+  ASSERT_FALSE(query.empty());
+
+  sendQueryFromClient("10.0.0.1:1000", query);
+
+  // Verify the response
+  response_ctx_ = ResponseValidator::createResponseContext(udp_response_, counters_);
+  EXPECT_TRUE(response_ctx_->parse_status_);
+
+  EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_ctx_->getQueryResponseCode());
+  EXPECT_EQ(1, response_ctx_->answers_.size());
+
+  // Extract the log entry
+  ASSERT_EQ(output_.size(), 1); // Ensure there is exactly one log entry
+  const std::string& log_entry = output_.front();
+
+  // Parse the timestamp and verify it is non-zero
+  const std::string expected_prefix = "Request Start Time (ms): ";
+  size_t timestamp_start = log_entry.find(expected_prefix) + expected_prefix.size();
+  size_t timestamp_end = log_entry.find("\n", timestamp_start);
+  std::string timestamp = log_entry.substr(timestamp_start, timestamp_end - timestamp_start);
+  EXPECT_NE(timestamp, "0");
+
+  // Verify the rest of the log entry
+  const std::string expected_log_entry_suffix = fmt::format(
+      "Remote IP: 10.0.0.1\n"
+      "Local IP: 127.0.2.1\n"
+      "DNS Question Name: {}\n"
+      "DNS Question Type: {}\n"
+      "DNS Question Class: {}\n",
+      domain, DNS_RECORD_TYPE_A, DNS_RECORD_CLASS_IN);
+
+  EXPECT_TRUE(log_entry.find(expected_log_entry_suffix) != std::string::npos);
 }
 
 TEST_F(DnsFilterTest, NoHostForSingleTypeAQuery) {

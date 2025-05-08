@@ -44,7 +44,7 @@ DEFINE_FUZZER(const uint8_t* buf, size_t len) {
     DnsMessageParser message_parser(true, api->timeSource(), retry_count, random, histogram);
 
     DnsQueryContextPtr query_context =
-        std::make_unique<DnsQueryContext>(local, peer, counters, retry_count);
+        std::make_unique<DnsQueryContext>(local, peer, counters, retry_count, api->timeSource());
     bool result = message_parser.parseDnsObject(query_context, query_buffer);
     UNREFERENCED_PARAMETER(result);
 

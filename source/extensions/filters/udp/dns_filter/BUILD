@@ -33,6 +33,7 @@ envoy_cc_library(
         "//envoy/network:filter_interface",
         "//envoy/network:listener_interface",
         "//source/common/buffer:buffer_lib",
+        "//source/common/access_log:access_log_lib",
         "//source/common/common:empty_string",
         "//source/common/common:safe_memcpy_lib",
         "//source/common/common:trie_lookup_table_lib",
@@ -57,6 +58,7 @@ envoy_cc_extension(
         ":dns_filter_lib",
         "//envoy/registry",
         "//envoy/server:filter_config_interface",
+        "@envoy_api//envoy/extensions/access_loggers/file/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/filters/udp/dns_filter/v3:pkg_cc_proto",
     ],
 )
