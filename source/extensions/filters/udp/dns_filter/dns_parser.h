@@ -11,6 +11,7 @@
 #include "source/common/common/empty_string.h"
 #include "source/common/runtime/runtime_impl.h"
 #include "source/common/stats/timespan_impl.h"
+#include "source/common/stream_info/stream_info_impl.h"
 #include "source/extensions/filters/udp/dns_filter/dns_filter_constants.h"
 
 namespace Envoy {
@@ -188,10 +189,16 @@ class DnsQueryContext {
 public:
   DnsQueryContext(Network::Address::InstanceConstSharedPtr local,
                   Network::Address::InstanceConstSharedPtr peer, DnsParserCounters& counters,
-                  uint64_t retry_count)
+                  uint64_t retry_count, TimeSource& time_source)
       : local_(std::move(local)), peer_(std::move(peer)), counters_(counters),
-        response_code_(DNS_RESPONSE_CODE_NO_ERROR), retry_(retry_count) {}
+        response_code_(DNS_RESPONSE_CODE_NO_ERROR), retry_(retry_count),
+        stream_info_(time_source,
+          std::make_shared<Network::ConnectionInfoSetterImpl>(local_, peer_),
+          StreamInfo::FilterState::LifeSpan::FilterChain)  {}
 
+  // Accessor for StreamInfo
+  StreamInfo::StreamInfoImpl& streamInfo() { return stream_info_; }
+  
   const Network::Address::InstanceConstSharedPtr local_;
   const Network::Address::InstanceConstSharedPtr peer_;
   DnsParserCounters& counters_;
@@ -213,6 +220,9 @@ public:
    * @return uint16_t the response code flag value from a parsed dns object
    */
   uint16_t getQueryResponseCode() { return static_cast<uint16_t>(header_.flags.rcode); }
+
+  private:
+  StreamInfo::StreamInfoImpl stream_info_;               // StreamInfo for dynamic metadata
 };
 
 using DnsQueryContextPtr = std::unique_ptr<DnsQueryContext>;

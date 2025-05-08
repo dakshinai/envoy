@@ -283,6 +283,34 @@ Network::FilterStatus DnsFilter::onData(Network::UdpRecvData& client_request) {
     return Network::FilterStatus::StopIteration;
   }
 
+  // --- Begin: Set dynamic metadata ---
+  auto now = std::chrono::system_clock::now();
+  auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+  std::string local_ip = client_request.addresses_.local_->ip()->addressAsString();
+  std::string remote_ip = client_request.addresses_.peer_->ip()->addressAsString();
+
+  std::string dns_question_name;
+  uint16_t dns_question_type = 0;
+  uint16_t dns_question_class = 0;
+  if (!query_context->queries_.empty()) {
+    dns_question_name = query_context->queries_[0]->name_;
+    dns_question_type = query_context->queries_[0]->type_;
+    dns_question_class = query_context->queries_[0]->class_;
+  }
+
+  ProtobufWkt::Struct metadata;
+  (*metadata.mutable_fields())["request_start_time_ms"].set_string_value(std::to_string(now_ms));
+  (*metadata.mutable_fields())["remote_ip"].set_string_value(remote_ip);
+  (*metadata.mutable_fields())["local_ip"].set_string_value(local_ip);
+  (*metadata.mutable_fields())["dns_question_name"].set_string_value(dns_question_name);
+  (*metadata.mutable_fields())["dns_question_type"].set_string_value(std::to_string(dns_question_type));
+  (*metadata.mutable_fields())["dns_question_class"].set_string_value(std::to_string(dns_question_class));
+
+
+  query_context->streamInfo().setDynamicMetadata("envoy.extensions.filters.udp.dns_filter", metadata);
+  // --- End: Set dynamic metadata ---
+
   // Resolve the requested name and respond to the client. If the return code is
   // External, we will respond to the client when the upstream resolver returns
   if (getResponseForQuery(query_context) == DnsLookupResponseCode::External) {
