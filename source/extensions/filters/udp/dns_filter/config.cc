@@ -5,19 +5,18 @@ namespace Extensions {
 namespace UdpFilters {
 namespace DnsFilter {
 
-Network::UdpListenerFilterFactoryCb DnsFilterConfigFactory::createFilterFactoryFromProto(
+  Network::UdpListenerFilterFactoryCb DnsFilterConfigFactory::createFilterFactoryFromProto(
     const Protobuf::Message& config, Server::Configuration::ListenerFactoryContext& context) {
   // TODO: @dakshinai -  This change is temporary until we support access log configuration in the filter config.
   // Initialize access log configuration
   envoy::config::accesslog::v3::AccessLog log_config;
-  log_config.set_name("envoy.access_loggers.file");
+  log_config.set_name("envoy.access_loggers.stdout");
 
-  // Pack the FileAccessLog configuration into the typed_config field
+  // Pack the StdoutAccessLog configuration into the typed_config field
   google::protobuf::Any* file_config = log_config.mutable_typed_config();
-  envoy::extensions::access_loggers::file::v3::FileAccessLog file_access_log;
-  file_access_log.set_path("/var/log/envoy/dns_access.log");
+  envoy::extensions::access_loggers::stream::v3::StdoutAccessLog stdout_access_log;
 
-  file_access_log.mutable_log_format()->mutable_text_format_source()->set_inline_string(
+  stdout_access_log.mutable_log_format()->mutable_text_format_source()->set_inline_string(
     "peer_ip=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:peer_ip)% "
     "local_ip=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:local_ip)% "
     "dns_question_name=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:dns_question_name)% "
@@ -28,7 +27,7 @@ Network::UdpListenerFilterFactoryCb DnsFilterConfigFactory::createFilterFactoryF
     "dns_answer=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.response:dns_answer)%\n"
   );
 
-  file_config->PackFrom(file_access_log);
+  file_config->PackFrom(stdout_access_log);
 
   // Create the access log instance
   std::vector<AccessLog::InstanceSharedPtr> access_logs;
