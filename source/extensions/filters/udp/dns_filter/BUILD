@@ -58,7 +58,6 @@ envoy_cc_extension(
         ":dns_filter_lib",
         "//envoy/registry",
         "//envoy/server:filter_config_interface",
-        "@envoy_api//envoy/extensions/access_loggers/stream/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/filters/udp/dns_filter/v3:pkg_cc_proto",
     ],
 )

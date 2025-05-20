@@ -19,17 +19,20 @@ static constexpr std::chrono::seconds DEFAULT_RESOLVER_TTL{300};
 
 DnsFilterEnvoyConfig::DnsFilterEnvoyConfig(
     Server::Configuration::ListenerFactoryContext& context,
-    const envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig& config,
-    std::vector<AccessLog::InstanceSharedPtr> access_logs)
+    const envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig& config)
     : root_scope_(context.scope()),
       cluster_manager_(context.serverFactoryContext().clusterManager()),
       api_(context.serverFactoryContext().api()),
       stats_(generateStats(config.stat_prefix(), root_scope_)),
       resolver_timeout_(DEFAULT_RESOLVER_TIMEOUT),
-      random_(context.serverFactoryContext().api().randomGenerator()),
-      access_logs_(std::move(access_logs)) {
+      random_(context.serverFactoryContext().api().randomGenerator()) {
   using envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig;
 
+  access_logs_.reserve(config.access_log_size());
+  for (const envoy::config::accesslog::v3::AccessLog& log_config : config.access_log()) {
+    access_logs_.emplace_back(AccessLog::AccessLogFactory::fromProto(log_config, context));
+  }
+    
   const auto& server_config = config.server_config();
 
   envoy::data::dns::v3::DnsTable dns_table;

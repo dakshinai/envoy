@@ -81,8 +81,7 @@ class DnsFilterEnvoyConfig : public Logger::Loggable<Logger::Id::filter> {
 public:
   DnsFilterEnvoyConfig(
       Server::Configuration::ListenerFactoryContext& context,
-      const envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig& config,
-      std::vector<AccessLog::InstanceSharedPtr> access_logs = {});
+      const envoy::extensions::filters::udp::dns_filter::v3::DnsFilterConfig& config);
 
   DnsFilterStats& stats() const { return stats_; }
   const absl::flat_hash_map<std::string, std::chrono::seconds>& domainTtl() const {
