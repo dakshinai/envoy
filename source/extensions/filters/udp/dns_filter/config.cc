@@ -15,14 +15,19 @@ Network::UdpListenerFilterFactoryCb DnsFilterConfigFactory::createFilterFactoryF
   // Pack the FileAccessLog configuration into the typed_config field
   google::protobuf::Any* file_config = log_config.mutable_typed_config();
   envoy::extensions::access_loggers::file::v3::FileAccessLog file_access_log;
-  file_access_log.set_path("dns_filter_access.log");
+  file_access_log.set_path("/var/log/envoy/dns_access.log");
+
   file_access_log.mutable_log_format()->mutable_text_format_source()->set_inline_string(
-      "Request Start Time (ms): %DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:request_start_time_ms)%\n"
-      "Remote IP: %DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:remote_ip)%\n"
-      "Local IP: %DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:local_ip)%\n"
-      "DNS Question Name: %DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:dns_question_name)%\n"
-      "DNS Question Type: %DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:dns_question_type)%\n"
-      "DNS Question Class: %DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:dns_question_class)%\n");
+    "peer_ip=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:peer_ip)% "
+    "local_ip=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:local_ip)% "
+    "dns_question_name=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:dns_question_name)% "
+    "dns_question_class=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:dns_question_class)% "
+    "dns_question_type=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:dns_question_type)% "
+    "request_start_time=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.request:request_start_time)% "
+    "response_code=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.response:response_code)% "
+    "dns_answer=%DYNAMIC_METADATA(envoy.extensions.filters.udp.dns_filter.response:dns_answer)%\n"
+  );
+
   file_config->PackFrom(file_access_log);
 
   // Create the access log instance

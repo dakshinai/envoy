@@ -47,26 +47,69 @@ class StringAccessLogger : public Envoy::AccessLog::Instance {
              const Envoy::StreamInfo::StreamInfo& stream_info) override {
       // Access dynamic metadata from StreamInfo
       const auto& metadata = stream_info.dynamicMetadata().filter_metadata();
-      const auto& dns_metadata = metadata.at("envoy.extensions.filters.udp.dns_filter.request").fields();
   
-      // Retrieve metadata fields
-      const std::string request_start_time_ms = dns_metadata.at("request_start_time_ms").string_value();
-      const std::string remote_ip = dns_metadata.at("remote_ip").string_value();
-      const std::string local_ip = dns_metadata.at("local_ip").string_value();
-      const std::string dns_question_name = dns_metadata.at("dns_question_name").string_value();
-      const std::string dns_question_type = dns_metadata.at("dns_question_type").string_value();
-      const std::string dns_question_class = dns_metadata.at("dns_question_class").string_value();
+      // Retrieve request metadata
+      std::string peer_ip = "-";
+      std::string local_ip = "-";
+      std::string dns_question_name = "-";
+      std::string dns_question_class = "-";
+      std::string dns_question_type = "-";
+      std::string request_start_time = "-";
+  
+      if (metadata.contains("envoy.extensions.filters.udp.dns_filter.request")) {
+        const auto& request_metadata = metadata.at("envoy.extensions.filters.udp.dns_filter.request").fields();
+        if (request_metadata.contains("peer_ip")) {
+          peer_ip = request_metadata.at("peer_ip").string_value();
+        }
+        if (request_metadata.contains("local_ip")) {
+          local_ip = request_metadata.at("local_ip").string_value();
+        }
+        if (request_metadata.contains("dns_question_name")) {
+          dns_question_name = request_metadata.at("dns_question_name").string_value();
+        }
+        if (request_metadata.contains("dns_question_class")) {
+          dns_question_class = request_metadata.at("dns_question_class").string_value();
+        }
+        if (request_metadata.contains("dns_question_type")) {
+          dns_question_type = request_metadata.at("dns_question_type").string_value();
+        }
+        if (request_metadata.contains("request_start_time")) {
+          request_start_time = request_metadata.at("request_start_time").string_value();
+        }
+      }
+  
+      // Retrieve response metadata
+      std::string response_code = "-";
+      std::string dns_answer = "-";
+  
+      if (metadata.contains("envoy.extensions.filters.udp.dns_filter.response")) {
+        const auto& response_metadata = metadata.at("envoy.extensions.filters.udp.dns_filter.response").fields();
+        if (response_metadata.contains("response_code")) {
+          response_code = response_metadata.at("response_code").string_value();
+        }
+        if (response_metadata.contains("dns_answer")) {
+          dns_answer = response_metadata.at("dns_answer").string_value();
+        }
+      }
   
       // Format the log entry to match the inline string format
       std::string log_entry = fmt::format(
-          "Request Start Time (ms): {}\n"
-          "Remote IP: {}\n"
-          "Local IP: {}\n"
-          "DNS Question Name: {}\n"
-          "DNS Question Type: {}\n"
-          "DNS Question Class: {}\n",
-          request_start_time_ms, remote_ip, local_ip, dns_question_name, dns_question_type,
-          dns_question_class);
+          "peer_ip={} "
+          "local_ip={} "
+          "dns_question_name={} "
+          "dns_question_type={} "
+          "dns_question_class={} "
+          "request_start_time={} "
+          "response_code={} "
+          "dns_answer={}\n",
+          peer_ip,
+          local_ip,
+          dns_question_name,
+          dns_question_type,
+          dns_question_class,
+          request_start_time,
+          response_code,
+          dns_answer);
   
       // Store the log entry
       output_.push_back(log_entry);
@@ -670,27 +713,35 @@ TEST_F(DnsFilterTest, MetadataPropagationToLogs) {
   EXPECT_EQ(DNS_RESPONSE_CODE_NO_ERROR, response_ctx_->getQueryResponseCode());
   EXPECT_EQ(1, response_ctx_->answers_.size());
 
-  // Extract the log entry
-  ASSERT_EQ(output_.size(), 1); // Ensure there is exactly one log entry
-  const std::string& log_entry = output_.front();
+  // Ensure there are exactly two log entries
+  ASSERT_EQ(output_.size(), 2) << "Expected exactly two log entries (request and response)";
 
-  // Parse the timestamp and verify it is non-zero
-  const std::string expected_prefix = "Request Start Time (ms): ";
-  size_t timestamp_start = log_entry.find(expected_prefix) + expected_prefix.size();
-  size_t timestamp_end = log_entry.find("\n", timestamp_start);
-  std::string timestamp = log_entry.substr(timestamp_start, timestamp_end - timestamp_start);
-  EXPECT_NE(timestamp, "0");
+  // Extract the request log entry
+  const std::string& request_log_entry = output_.front();
 
-  // Verify the rest of the log entry
-  const std::string expected_log_entry_suffix = fmt::format(
-      "Remote IP: 10.0.0.1\n"
-      "Local IP: 127.0.2.1\n"
-      "DNS Question Name: {}\n"
-      "DNS Question Type: {}\n"
-      "DNS Question Class: {}\n",
-      domain, DNS_RECORD_TYPE_A, DNS_RECORD_CLASS_IN);
+  // Validate the request log entry
+  const std::string expected_request_metadata = fmt::format(
+      "peer_ip=10.0.0.1 "
+      "local_ip=127.0.2.1 "
+      "dns_question_name={} "
+      "dns_question_type={} "
+      "dns_question_class={} ",
+      domain, Envoy::Extensions::UdpFilters::DnsFilter::dnsTypeToString(DNS_RECORD_TYPE_A), Envoy::Extensions::UdpFilters::DnsFilter::dnsClassToString(DNS_RECORD_CLASS_IN));
 
-  EXPECT_TRUE(log_entry.find(expected_log_entry_suffix) != std::string::npos);
+  EXPECT_TRUE(request_log_entry.find(expected_request_metadata) != std::string::npos)
+      << "Request log entry does not contain the expected request metadata: " << expected_request_metadata;
+
+  // Extract the response log entry
+  const std::string& response_log_entry = output_.back();
+
+  // Validate the response log entry
+  const std::string expected_response_metadata = fmt::format(
+    "response_code={} "
+    "dns_answer=['{} 300 IN A 10.0.3.1']",
+    Envoy::Extensions::UdpFilters::DnsFilter::dnsResponseCodeToString(DNS_RESPONSE_CODE_NO_ERROR), domain);
+
+  EXPECT_TRUE(response_log_entry.find(expected_response_metadata) != std::string::npos)
+      << "Response log entry does not contain the expected response metadata: " << expected_response_metadata;
 }
 
 TEST_F(DnsFilterTest, NoHostForSingleTypeAQuery) {

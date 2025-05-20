@@ -164,6 +164,39 @@ public:
 
 private:
   /**
+   * Helper function to set dynamic metadata for a given key and metadata struct.
+   *
+   * @param key The metadata key.
+   * @param metadata The metadata struct to set.
+   * @param query_context The query context to associate the metadata with.
+   */
+  void setDynamicMetadata(const std::string& key, const ProtobufWkt::Struct& metadata, DnsQueryContextPtr& query_context);
+
+  /**
+   * Helper function to write access logs for a given query context.
+   *
+   * @param query_context The query context to log.
+   */
+  void writeAccessLogs(const DnsQueryContextPtr& query_context);
+
+  /**
+   * Helper function to build request metadata.
+   *
+   * @param client_request The UDP client request.
+   * @param query_context The query context associated with the request.
+   * @return ProtobufWkt::Struct The constructed request metadata.
+   */
+  ProtobufWkt::Struct buildRequestMetadata(const Network::UdpRecvData& client_request, const DnsQueryContextPtr& query_context);
+
+  /**
+   * Helper function to build response metadata.
+   *
+   * @param query_context The query context associated with the response.
+   * @return ProtobufWkt::Struct The constructed response metadata.
+   */
+  ProtobufWkt::Struct buildResponseMetadata(const DnsQueryContextPtr& query_context);
+  
+  /**
    * Prepare the response buffer and send it to the client
    *
    * @param context contains the data necessary to create a response and send it to a client

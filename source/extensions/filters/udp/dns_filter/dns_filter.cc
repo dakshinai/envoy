@@ -265,6 +265,107 @@ DnsFilter::DnsFilter(Network::UdpReadFilterCallbacks& callbacks,
       config->api());
 }
 
+void DnsFilter::setDynamicMetadata(const std::string& key, const ProtobufWkt::Struct& metadata, DnsQueryContextPtr& query_context) {
+  if (!metadata.fields().empty()) {
+    query_context->streamInfo().setDynamicMetadata(key, metadata);
+  }
+}
+
+void DnsFilter::writeAccessLogs(const DnsQueryContextPtr& query_context) {
+  if (!config_->accessLogs().empty()) {
+    for (const auto& access_log : config_->accessLogs()) {
+      access_log->log({}, query_context->streamInfo());
+    }
+  }
+}
+
+ProtobufWkt::Struct DnsFilter::buildRequestMetadata(const Network::UdpRecvData& client_request, const DnsQueryContextPtr& query_context) {
+  ProtobufWkt::Struct metadata;
+
+  // Get the current time and format it
+  auto now = listener_.dispatcher().timeSource().systemTime();
+  auto now_seconds = std::chrono::time_point_cast<std::chrono::seconds>(now);
+  std::string formatted_request_start_time = fmt::format("{:%Y/%m/%d %H:%M:%S}", now_seconds);
+
+  // Populate metadata fields
+  (*metadata.mutable_fields())["peer_ip"].set_string_value(client_request.addresses_.peer_->ip()->addressAsString());
+  (*metadata.mutable_fields())["local_ip"].set_string_value(client_request.addresses_.local_->ip()->addressAsString());
+  (*metadata.mutable_fields())["request_start_time"].set_string_value(formatted_request_start_time);
+
+  if (!query_context->queries_.empty()) {
+    const auto& query = query_context->queries_[0];
+
+    std::string dns_type = Envoy::Extensions::UdpFilters::DnsFilter::dnsTypeToString(query->type_);
+    std::string dns_class = Envoy::Extensions::UdpFilters::DnsFilter::dnsClassToString(query->class_);
+
+    (*metadata.mutable_fields())["dns_question_name"].set_string_value(query->name_);
+    (*metadata.mutable_fields())["dns_question_class"].set_string_value(dns_class);
+    (*metadata.mutable_fields())["dns_question_type"].set_string_value(dns_type);
+  }
+
+  return metadata;
+}
+
+ProtobufWkt::Struct DnsFilter::buildResponseMetadata(const DnsQueryContextPtr& query_context) {
+  ProtobufWkt::Struct metadata;
+
+  // Set response_code using the helper function
+  (*metadata.mutable_fields())["response_code"].set_string_value(
+    Envoy::Extensions::UdpFilters::DnsFilter::dnsResponseCodeToString(query_context->response_code_));
+
+  // Serialize DNS answers into a JSON-like string
+  std::string dns_answers = "[";
+  for (const auto& [key, answer_ptr] : query_context->answers_) {
+    const auto& answer = *answer_ptr;
+
+    // Determine the DNS class and type using helper functions
+    std::string dns_class = Envoy::Extensions::UdpFilters::DnsFilter::dnsClassToString(answer.class_);
+    if (dns_class == "UNKNOWN_CLASS") {
+      ENVOY_LOG(warn, "Unsupported DNS class: {}", answer.class_);
+      continue; // Skip this answer if the class is unknown
+    }
+    
+    std::string dns_type = Envoy::Extensions::UdpFilters::DnsFilter::dnsTypeToString(answer.type_);
+
+    // Format the answer based on its type
+    switch (answer.type_) {
+      case DNS_RECORD_TYPE_A: // A record (IPv4)
+        dns_answers += "'" + answer.name_ + " " + std::to_string(answer.ttl_.count()) + " " +
+                       dns_class + " " + dns_type + " " + answer.ip_addr_->ip()->addressAsString() + "',";
+        break;
+  
+      case DNS_RECORD_TYPE_AAAA: // AAAA record (IPv6)
+        dns_answers += "'" + answer.name_ + " " + std::to_string(answer.ttl_.count()) + " " +
+                       dns_class + " " + dns_type + " " + answer.ip_addr_->ip()->addressAsString() + "',";
+        break;
+  
+      case DNS_RECORD_TYPE_SRV: // SRV record
+        dns_answers += "'" + answer.name_ + " " + std::to_string(answer.ttl_.count()) + " " +
+                       dns_class + " " + dns_type + " " + key + "',"; // Use the key for SRV-specific data
+        break;
+  
+      case DNS_RECORD_TYPE_OPT: // OPT record
+        dns_answers += "'" + answer.name_ + " " + std::to_string(answer.ttl_.count()) + " " +
+                       dns_class + " " + dns_type + " " + key + "',"; // Use the key for OPT-specific data
+        break;
+  
+      default:
+        ENVOY_LOG(warn, "Unsupported DNS record type: {}", dns_type);
+        break;
+      }
+  }
+
+  if (dns_answers.back() == ',') {
+    dns_answers.pop_back(); // Remove trailing comma
+  }
+  dns_answers += "]";
+
+  // Set dns_answer
+  (*metadata.mutable_fields())["dns_answer"].set_string_value(dns_answers);
+
+  return metadata;
+}
+
 Network::FilterStatus DnsFilter::onData(Network::UdpRecvData& client_request) {
   config_->stats().downstream_rx_bytes_.recordValue(client_request.buffer_->length());
   config_->stats().downstream_rx_queries_.inc();
@@ -285,42 +386,12 @@ Network::FilterStatus DnsFilter::onData(Network::UdpRecvData& client_request) {
     return Network::FilterStatus::StopIteration;
   }
 
-  // --- Begin: Set dynamic metadata ---
-  // auto now = std::chrono::system_clock::now();
-  auto now = listener_.dispatcher().timeSource().systemTime();
-  auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+  // Set request metadata
+  ProtobufWkt::Struct request_metadata = buildRequestMetadata(client_request, query_context);
+  setDynamicMetadata("envoy.extensions.filters.udp.dns_filter.request", request_metadata, query_context);
 
-  std::string local_ip = client_request.addresses_.local_->ip()->addressAsString();
-  std::string remote_ip = client_request.addresses_.peer_->ip()->addressAsString();
-
-  std::string dns_question_name;
-  uint16_t dns_question_type = 0;
-  uint16_t dns_question_class = 0;
-  if (!query_context->queries_.empty()) {
-    dns_question_name = query_context->queries_[0]->name_;
-    dns_question_type = query_context->queries_[0]->type_;
-    dns_question_class = query_context->queries_[0]->class_;
-  }
-
-  ProtobufWkt::Struct metadata;
-  (*metadata.mutable_fields())["request_start_time_ms"].set_string_value(std::to_string(now_ms));
-  (*metadata.mutable_fields())["remote_ip"].set_string_value(remote_ip);
-  (*metadata.mutable_fields())["local_ip"].set_string_value(local_ip);
-  (*metadata.mutable_fields())["dns_question_name"].set_string_value(dns_question_name);
-  (*metadata.mutable_fields())["dns_question_type"].set_string_value(std::to_string(dns_question_type));
-  (*metadata.mutable_fields())["dns_question_class"].set_string_value(std::to_string(dns_question_class));
-
-
-  query_context->streamInfo().setDynamicMetadata("envoy.extensions.filters.udp.dns_filter.request", metadata);
-  // --- End: Set dynamic metadata ---
-
-  // --- Begin: Write to access logs ---
-  if (!config_->accessLogs().empty()) {
-    for (const auto& access_log : config_->accessLogs()) {
-      access_log->log({}, query_context->streamInfo());
-    }
-  } 
-  // --- End: Write to access logs ---
+  // Write to access logs
+  writeAccessLogs(query_context);
   
   // Resolve the requested name and respond to the client. If the return code is
   // External, we will respond to the client when the upstream resolver returns
@@ -340,6 +411,14 @@ void DnsFilter::sendDnsResponse(DnsQueryContextPtr query_context) {
   // Serializes the generated response to the parsed query from the client. If there is a
   // parsing error or the incoming query is invalid, we will still generate a valid DNS response
   message_parser_.buildResponseBuffer(query_context, response);
+
+  // Set response metadata
+  ProtobufWkt::Struct response_metadata = buildResponseMetadata(query_context);
+  setDynamicMetadata("envoy.extensions.filters.udp.dns_filter.response", response_metadata, query_context);
+
+  // Write to access logs
+  writeAccessLogs(query_context);
+
   config_->stats().downstream_tx_responses_.inc();
   config_->stats().downstream_tx_bytes_.recordValue(response.length());
   Network::UdpSendData response_data{query_context->local_->ip(), *(query_context->peer_),

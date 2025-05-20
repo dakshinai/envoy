@@ -33,6 +33,54 @@ constexpr size_t MAX_RETURNED_RECORDS = 8;
 // add DNS extension fields
 constexpr uint64_t MAX_DNS_RESPONSE_SIZE = 512;
 
+/**
+ * Converts a DNS class value to its corresponding string representation.
+ */
+inline std::string dnsClassToString(uint16_t class_value) {
+    switch (class_value) {
+    case DNS_RECORD_CLASS_IN:
+      return "IN"; // Internet
+    default:
+      return "UNKNOWN_CLASS";
+    }
+  }
+  
+/**
+ * Converts a DNS record type value to its corresponding string representation.
+ */
+inline std::string dnsTypeToString(uint16_t type_value) {
+    switch (type_value) {
+    case DNS_RECORD_TYPE_A:
+      return "A"; // IPv4 Address
+    case DNS_RECORD_TYPE_AAAA:
+      return "AAAA"; // IPv6 Address
+    case DNS_RECORD_TYPE_SRV:
+      return "SRV"; // Service Record
+    case DNS_RECORD_TYPE_OPT:
+      return "OPT"; // EDNS Option
+    default:
+      return "UNKNOWN_TYPE";
+    }
+  }
+  
+/**
+ * Converts a DNS response code to its corresponding string representation.
+ */
+inline std::string dnsResponseCodeToString(uint16_t response_code) {
+    switch (response_code) {
+    case DNS_RESPONSE_CODE_NO_ERROR:
+      return "NO_ERROR";
+    case DNS_RESPONSE_CODE_FORMAT_ERROR:
+      return "FORMAT_ERROR";
+    case DNS_RESPONSE_CODE_NAME_ERROR:
+      return "NAME_ERROR";
+    case DNS_RESPONSE_CODE_NOT_IMPLEMENTED:
+      return "NOT_IMPLEMENTED";
+    default:
+      return "UNKNOWN_RESPONSE_CODE";
+    }
+  }
+
 } // namespace DnsFilter
 } // namespace UdpFilters
 } // namespace Extensions
