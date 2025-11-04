@@ -129,6 +129,119 @@ private:
                  return ctx.parse_status_ ? "true" : "false";
                });
              }},
+            {"LOCAL_IP",
+             [](absl::string_view, absl::optional<size_t>) -> Formatter::FormatterProviderPtr {
+               return makeContextFieldProvider(
+                   [](const DnsQueryContext& ctx) -> std::string {
+                     return ctx.local_ ? ctx.local_->asString() : "";
+                   });
+             }},
+            {"PEER_IP",
+             [](absl::string_view, absl::optional<size_t>) -> Formatter::FormatterProviderPtr {
+               return makeContextFieldProvider(
+                   [](const DnsQueryContext& ctx) -> std::string {
+                     return ctx.peer_ ? ctx.peer_->asString() : "";
+                   });
+             }},
+            {"RESOLUTION_STATUS",
+             [](absl::string_view, absl::optional<size_t>) -> Formatter::FormatterProviderPtr {
+               return makeContextFieldProvider([](const DnsQueryContext& ctx) -> std::string {
+                 return ctx.resolution_status_ == Network::DnsResolver::ResolutionStatus::Completed
+                        ? "Completed"
+                        : "Failure";
+               });
+             }},
+            {"RETRY_COUNT",
+             [](absl::string_view, absl::optional<size_t>) -> Formatter::FormatterProviderPtr {
+               return makeContextFieldProvider([](const DnsQueryContext& ctx) -> std::string {
+                 return absl::StrCat(ctx.retry_);
+               });
+             }},
+            {"DNS_ANSWERS",
+             [](absl::string_view, absl::optional<size_t>) -> Formatter::FormatterProviderPtr {
+               return makeContextFieldProvider([](const DnsQueryContext& ctx) -> std::string {
+                 std::vector<std::string> records;
+
+                 for (const auto& answer_pair : ctx.answers_) {
+                   const auto& record = answer_pair.second;
+                   std::string formatted_record;
+                   std::string dns_class = "IN";  // DNS class (usually IN for Internet)
+                   std::string dns_type;
+
+                   // Determine the DNS type string
+                   switch (record->type_) {
+                     case DNS_RECORD_TYPE_A: dns_type = "A"; break;
+                     case DNS_RECORD_TYPE_AAAA: dns_type = "AAAA"; break;
+                     case DNS_RECORD_TYPE_SRV: dns_type = "SRV"; break;
+                     case DNS_RECORD_TYPE_OPT: dns_type = "OPT"; break;
+                     default: dns_type = absl::StrCat("TYPE", record->type_); break;
+                   }
+
+                   // Format the answer based on its type
+                   switch (record->type_) {
+                     case DNS_RECORD_TYPE_A: // A record (IPv4)
+                       if (record->ip_addr_) {
+                         formatted_record = absl::StrCat(
+                           "'", record->name_, " ", record->ttl_.count(), " ",
+                           dns_class, " ", dns_type, " ", record->ip_addr_->ip()->addressAsString(), "'");
+                       }
+                       break;
+
+                     case DNS_RECORD_TYPE_AAAA: // AAAA record (IPv6)
+                       if (record->ip_addr_) {
+                         formatted_record = absl::StrCat(
+                           "'", record->name_, " ", record->ttl_.count(), " ",
+                           dns_class, " ", dns_type, " ", record->ip_addr_->ip()->addressAsString(), "'");
+                       }
+                       break;
+
+                     case DNS_RECORD_TYPE_SRV: // SRV record
+                     {
+                       // Cast to DnsSrvRecord to access SRV-specific fields
+                       const DnsSrvRecord* srv_record = dynamic_cast<const DnsSrvRecord*>(record.get());
+                       if (srv_record) {
+                         std::string srv_data;
+                         for (const auto& target_pair : srv_record->targets_) {
+                           if (!srv_data.empty()) srv_data += ",";
+                           srv_data += absl::StrCat(
+                             target_pair.second.priority, " ",
+                             target_pair.second.weight, " ",
+                             target_pair.second.port, " ",
+                             target_pair.first);
+                         }
+                         formatted_record = absl::StrCat(
+                           "'", record->name_, " ", record->ttl_.count(), " ",
+                           dns_class, " ", dns_type, " ", srv_data, "'");
+                       }
+                       break;
+                     }
+
+                     case DNS_RECORD_TYPE_OPT: // OPT record
+                       // For OPT records, we don't have specific data to show
+                       formatted_record = absl::StrCat(
+                         "'", record->name_, " ", record->ttl_.count(), " ",
+                         dns_class, " ", dns_type, " <edns_options>", "'");
+                       break;
+
+                     default:
+                       // Unsupported DNS record type - format as generic record
+                       formatted_record = absl::StrCat(
+                         "'", record->name_, " ", record->ttl_.count(), " ",
+                         dns_class, " ", dns_type, " <unsupported>", "'");
+                       break;
+                   }
+
+                   if (!formatted_record.empty()) {
+                     records.push_back(std::move(formatted_record));
+                   }
+                 }
+
+                 if (records.empty()) {
+                   return "";
+                 }
+                 return absl::StrCat("dns_answer=[", absl::StrJoin(records, ","), "]");
+               });
+             }},
         });
   }
 };

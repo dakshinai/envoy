@@ -49,6 +49,11 @@ public:
     answer_count_formatter_ = parser->parse("ANSWER_COUNT", "", absl::nullopt);
     response_code_formatter_ = parser->parse("RESPONSE_CODE", "", absl::nullopt);
     parse_status_formatter_ = parser->parse("PARSE_STATUS", "", absl::nullopt);
+    local_ip_formatter_ = parser->parse("LOCAL_IP", "", absl::nullopt);
+    peer_ip_formatter_ = parser->parse("PEER_IP", "", absl::nullopt);
+    resolution_status_formatter_ = parser->parse("RESOLUTION_STATUS", "", absl::nullopt);
+    retry_count_formatter_ = parser->parse("RETRY_COUNT", "", absl::nullopt);
+    dns_answers_formatter_ = parser->parse("DNS_ANSWERS", "", absl::nullopt);
   }
 
   void log(const Formatter::Context& context, const StreamInfo::StreamInfo& stream_info) override {
@@ -61,6 +66,11 @@ public:
     answer_count_ = answer_count_formatter_->format(context, stream_info);
     response_code_ = response_code_formatter_->format(context, stream_info);
     parse_status_ = parse_status_formatter_->format(context, stream_info);
+    local_ip_ = local_ip_formatter_->format(context, stream_info);
+    peer_ip_ = peer_ip_formatter_->format(context, stream_info);
+    resolution_status_ = resolution_status_formatter_->format(context, stream_info);
+    retry_count_ = retry_count_formatter_->format(context, stream_info);
+    dns_answers_ = dns_answers_formatter_->format(context, stream_info);
 
     // Store address information for testing
     remote_address_ = stream_info.downstreamAddressProvider().remoteAddress()->asString();
@@ -75,6 +85,11 @@ public:
     answer_count_ = absl::nullopt;
     response_code_ = absl::nullopt;
     parse_status_ = absl::nullopt;
+    local_ip_ = absl::nullopt;
+    peer_ip_ = absl::nullopt;
+    resolution_status_ = absl::nullopt;
+    retry_count_ = absl::nullopt;
+    dns_answers_ = absl::nullopt;
     remote_address_.clear();
     local_address_.clear();
   }
@@ -88,6 +103,11 @@ public:
   Formatter::FormatterProviderPtr answer_count_formatter_;
   Formatter::FormatterProviderPtr response_code_formatter_;
   Formatter::FormatterProviderPtr parse_status_formatter_;
+  Formatter::FormatterProviderPtr local_ip_formatter_;
+  Formatter::FormatterProviderPtr peer_ip_formatter_;
+  Formatter::FormatterProviderPtr resolution_status_formatter_;
+  Formatter::FormatterProviderPtr retry_count_formatter_;
+  Formatter::FormatterProviderPtr dns_answers_formatter_;
 
   // Formatted values
   absl::optional<std::string> query_name_;
@@ -96,6 +116,11 @@ public:
   absl::optional<std::string> answer_count_;
   absl::optional<std::string> response_code_;
   absl::optional<std::string> parse_status_;
+  absl::optional<std::string> local_ip_;
+  absl::optional<std::string> peer_ip_;
+  absl::optional<std::string> resolution_status_;
+  absl::optional<std::string> retry_count_;
+  absl::optional<std::string> dns_answers_;
 
   // Address information
   std::string remote_address_;
@@ -247,6 +272,11 @@ server_config:
   EXPECT_EQ(test_access_log_->answer_count_.value(), "2");
   EXPECT_EQ(test_access_log_->response_code_.value(), "0"); // DNS_RESPONSE_CODE_NO_ERROR
   EXPECT_EQ(test_access_log_->parse_status_.value(), "true");
+  EXPECT_EQ(test_access_log_->local_ip_.value(), "127.0.0.1:53");
+  EXPECT_EQ(test_access_log_->peer_ip_.value(), "192.168.1.100:54321");
+  EXPECT_EQ(test_access_log_->resolution_status_.value(), "Completed");
+  EXPECT_EQ(test_access_log_->retry_count_.value(), "0");
+  EXPECT_EQ(test_access_log_->dns_answers_.value(), "");
 }
 
 // Test access logging with AAAA query using custom formatters
@@ -546,6 +576,211 @@ TEST(DnsFilterCommandParserTest, ParseStatusFormatter) {
   EXPECT_EQ(value.string_value(), "true");
 }
 
+TEST(DnsFilterCommandParserTest, LocalIpFormatter) {
+  auto parser = createDnsFilterCommandParser();
+  auto formatter = parser->parse("LOCAL_IP", "", absl::nullopt);
+  ASSERT_NE(formatter, nullptr);
+
+  Event::SimulatedTimeSystem test_time;
+  auto connection_info = std::make_shared<Network::ConnectionInfoSetterImpl>(nullptr, nullptr);
+  StreamInfo::StreamInfoImpl stream_info(test_time, connection_info,
+                                         StreamInfo::FilterState::LifeSpan::Connection);
+
+  NiceMock<Stats::MockCounter> mock_counter;
+  DnsParserCounters counters(mock_counter, mock_counter, mock_counter, mock_counter, mock_counter);
+  auto local_addr = Network::Utility::parseInternetAddressAndPortNoThrow("127.0.0.1:53");
+  auto peer_addr = Network::Utility::parseInternetAddressAndPortNoThrow("192.168.1.100:54321");
+  auto dns_context = std::make_unique<DnsQueryContext>(local_addr, peer_addr, counters, 0);
+
+  Formatter::Context formatter_context;
+  formatter_context.setExtension(*dns_context);
+
+  auto result = formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(result.value(), "127.0.0.1:53");
+
+  auto value = formatter->formatValue(formatter_context, stream_info);
+  EXPECT_EQ(value.string_value(), "127.0.0.1:53");
+}
+
+TEST(DnsFilterCommandParserTest, PeerIpFormatter) {
+  auto parser = createDnsFilterCommandParser();
+  auto formatter = parser->parse("PEER_IP", "", absl::nullopt);
+  ASSERT_NE(formatter, nullptr);
+
+  Event::SimulatedTimeSystem test_time;
+  auto connection_info = std::make_shared<Network::ConnectionInfoSetterImpl>(nullptr, nullptr);
+  StreamInfo::StreamInfoImpl stream_info(test_time, connection_info,
+                                         StreamInfo::FilterState::LifeSpan::Connection);
+
+  NiceMock<Stats::MockCounter> mock_counter;
+  DnsParserCounters counters(mock_counter, mock_counter, mock_counter, mock_counter, mock_counter);
+  auto local_addr = Network::Utility::parseInternetAddressAndPortNoThrow("127.0.0.1:53");
+  auto peer_addr = Network::Utility::parseInternetAddressAndPortNoThrow("192.168.1.100:54321");
+  auto dns_context = std::make_unique<DnsQueryContext>(local_addr, peer_addr, counters, 0);
+
+  Formatter::Context formatter_context;
+  formatter_context.setExtension(*dns_context);
+
+  auto result = formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(result.value(), "192.168.1.100:54321");
+
+  auto value = formatter->formatValue(formatter_context, stream_info);
+  EXPECT_EQ(value.string_value(), "192.168.1.100:54321");
+}
+
+TEST(DnsFilterCommandParserTest, LocalIpAndPeerIpNullAddresses) {
+  auto parser = createDnsFilterCommandParser();
+  auto local_formatter = parser->parse("LOCAL_IP", "", absl::nullopt);
+  auto peer_formatter = parser->parse("PEER_IP", "", absl::nullopt);
+  ASSERT_NE(local_formatter, nullptr);
+  ASSERT_NE(peer_formatter, nullptr);
+
+  Event::SimulatedTimeSystem test_time;
+  auto connection_info = std::make_shared<Network::ConnectionInfoSetterImpl>(nullptr, nullptr);
+  StreamInfo::StreamInfoImpl stream_info(test_time, connection_info,
+                                         StreamInfo::FilterState::LifeSpan::Connection);
+
+  NiceMock<Stats::MockCounter> mock_counter;
+  DnsParserCounters counters(mock_counter, mock_counter, mock_counter, mock_counter, mock_counter);
+  // Create context with nullptr addresses
+  auto dns_context = std::make_unique<DnsQueryContext>(nullptr, nullptr, counters, 0);
+
+  Formatter::Context formatter_context;
+  formatter_context.setExtension(*dns_context);
+
+  // When addresses are null, formatters should return empty string
+  auto local_result = local_formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(local_result.value(), "");
+
+  auto peer_result = peer_formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(peer_result.value(), "");
+}
+
+TEST(DnsFilterCommandParserTest, ResolutionStatusFormatter) {
+  auto parser = createDnsFilterCommandParser();
+  auto formatter = parser->parse("RESOLUTION_STATUS", "", absl::nullopt);
+  ASSERT_NE(formatter, nullptr);
+
+  Event::SimulatedTimeSystem test_time;
+  auto connection_info = std::make_shared<Network::ConnectionInfoSetterImpl>(nullptr, nullptr);
+  StreamInfo::StreamInfoImpl stream_info(test_time, connection_info,
+                                         StreamInfo::FilterState::LifeSpan::Connection);
+
+  NiceMock<Stats::MockCounter> mock_counter;
+  DnsParserCounters counters(mock_counter, mock_counter, mock_counter, mock_counter, mock_counter);
+
+  // Test with default Completed status
+  auto dns_context = std::make_unique<DnsQueryContext>(nullptr, nullptr, counters, 0);
+
+  Formatter::Context formatter_context;
+  formatter_context.setExtension(*dns_context);
+
+  auto result = formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(result.value(), "Completed");
+
+  auto value = formatter->formatValue(formatter_context, stream_info);
+  EXPECT_EQ(value.string_value(), "Completed");
+
+  // Test with Failure status
+  dns_context->resolution_status_ = Network::DnsResolver::ResolutionStatus::Failure;
+  result = formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(result.value(), "Failure");
+
+  value = formatter->formatValue(formatter_context, stream_info);
+  EXPECT_EQ(value.string_value(), "Failure");
+}
+
+TEST(DnsFilterCommandParserTest, RetryCountFormatter) {
+  auto parser = createDnsFilterCommandParser();
+  auto formatter = parser->parse("RETRY_COUNT", "", absl::nullopt);
+  ASSERT_NE(formatter, nullptr);
+
+  Event::SimulatedTimeSystem test_time;
+  auto connection_info = std::make_shared<Network::ConnectionInfoSetterImpl>(nullptr, nullptr);
+  StreamInfo::StreamInfoImpl stream_info(test_time, connection_info,
+                                         StreamInfo::FilterState::LifeSpan::Connection);
+
+  NiceMock<Stats::MockCounter> mock_counter;
+  DnsParserCounters counters(mock_counter, mock_counter, mock_counter, mock_counter, mock_counter);
+
+  // Test with default retry count of 0
+  auto dns_context = std::make_unique<DnsQueryContext>(nullptr, nullptr, counters, 0);
+
+  Formatter::Context formatter_context;
+  formatter_context.setExtension(*dns_context);
+
+  auto result = formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(result.value(), "0");
+
+  auto value = formatter->formatValue(formatter_context, stream_info);
+  EXPECT_EQ(value.string_value(), "0");
+
+  // Test with retry count set to 2
+  dns_context->retry_ = 2;
+  result = formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(result.value(), "2");
+
+  value = formatter->formatValue(formatter_context, stream_info);
+  EXPECT_EQ(value.string_value(), "2");
+}
+
+TEST(DnsFilterCommandParserTest, DnsAnswersFormatter) {
+  auto parser = createDnsFilterCommandParser();
+  auto formatter = parser->parse("DNS_ANSWERS", "", absl::nullopt);
+  ASSERT_NE(formatter, nullptr);
+
+  Event::SimulatedTimeSystem test_time;
+  auto connection_info = std::make_shared<Network::ConnectionInfoSetterImpl>(nullptr, nullptr);
+  StreamInfo::StreamInfoImpl stream_info(test_time, connection_info,
+                                         StreamInfo::FilterState::LifeSpan::Connection);
+
+  NiceMock<Stats::MockCounter> mock_counter;
+  DnsParserCounters counters(mock_counter, mock_counter, mock_counter, mock_counter, mock_counter);
+
+  // Test with no answers
+  auto dns_context = std::make_unique<DnsQueryContext>(nullptr, nullptr, counters, 0);
+
+  Formatter::Context formatter_context;
+  formatter_context.setExtension(*dns_context);
+
+  auto result = formatter->format(formatter_context, stream_info);
+  EXPECT_EQ(result.value(), "");
+
+  // Add some answer records
+  auto addr1 = Network::Utility::parseInternetAddress("1.2.3.4");
+  auto addr2 = Network::Utility::parseInternetAddress("2001:db8::1");
+
+  auto answer1 = std::make_unique<DnsAnswerRecord>("example.com", DNS_RECORD_TYPE_A,
+                                                  DNS_RECORD_CLASS_IN, std::chrono::seconds(300), addr1);
+  auto answer2 = std::make_unique<DnsAnswerRecord>("example.com", DNS_RECORD_TYPE_AAAA,
+                                                  DNS_RECORD_CLASS_IN, std::chrono::seconds(300), addr2);
+
+  // Add an SRV record
+  auto srv_record = std::make_unique<DnsSrvRecord>("_sip._tcp.example.com", "tcp",
+                                                  std::chrono::seconds(300));
+  DnsSrvRecord::DnsTargetAttributes attrs{10, 20, 5060, false};
+  srv_record->addTarget("sip.example.com", attrs);
+
+  dns_context->answers_.emplace("example.com", std::move(answer1));
+  dns_context->answers_.emplace("example.com", std::move(answer2));
+  dns_context->answers_.emplace("_sip._tcp.example.com", std::move(srv_record));
+
+  result = formatter->format(formatter_context, stream_info);
+  // Should format as dig-style output
+  EXPECT_TRUE(absl::StrContains(result.value(), "dns_answer=["));
+  EXPECT_TRUE(absl::StrContains(result.value(), "'example.com 300 IN A 1.2.3.4'"));
+  EXPECT_TRUE(absl::StrContains(result.value(), "'example.com 300 IN AAAA 2001:db8::1'"));
+  EXPECT_TRUE(absl::StrContains(result.value(), "]"));
+
+  // Verify the format includes A, AAAA, and SRV records with proper class/type
+  EXPECT_TRUE(absl::StrContains(result.value(), "'example.com 300 IN A 1.2.3.4'"));
+  EXPECT_TRUE(absl::StrContains(result.value(), "'example.com 300 IN AAAA 2001:db8::1'"));
+  EXPECT_TRUE(absl::StrContains(result.value(), "'_sip._tcp.example.com 300 IN SRV 10 20 5060 sip.example.com'"));
+
+  auto value = formatter->formatValue(formatter_context, stream_info);
+  EXPECT_EQ(value.string_value(), result.value());
+}
+
 TEST(DnsFilterCommandParserTest, MissingMetadata) {
   auto parser = createDnsFilterCommandParser();
   auto formatter = parser->parse("QUERY_NAME", "", absl::nullopt);
@@ -603,6 +838,11 @@ TEST(DnsFilterCommandParserTest, EmptyCommandArg) {
   EXPECT_NE(parser->parse("ANSWER_COUNT", "", absl::nullopt), nullptr);
   EXPECT_NE(parser->parse("RESPONSE_CODE", "", absl::nullopt), nullptr);
   EXPECT_NE(parser->parse("PARSE_STATUS", "", absl::nullopt), nullptr);
+  EXPECT_NE(parser->parse("LOCAL_IP", "", absl::nullopt), nullptr);
+  EXPECT_NE(parser->parse("PEER_IP", "", absl::nullopt), nullptr);
+  EXPECT_NE(parser->parse("RESOLUTION_STATUS", "", absl::nullopt), nullptr);
+  EXPECT_NE(parser->parse("RETRY_COUNT", "", absl::nullopt), nullptr);
+  EXPECT_NE(parser->parse("DNS_ANSWERS", "", absl::nullopt), nullptr);
 }
 
 TEST(DnsFilterCommandParserTest, CaseSensitiveCommands) {
